@@ -8,14 +8,14 @@
 <link rel="apple-touch-icon" href="Icon.png">
 <meta name="apple-mobile-web-app-title" content="TimeFlow">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>TimeFlow — 438 cartes historiques</title>
+<title>TimeFlow — Voyage à travers le temps</title>
 <style>
 :root{--paper:#fffdf8;}
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 body{background:#b7804c;color:#3b2418}
 button{font:inherit;cursor:pointer}
-.app{position:relative;overflow:hidden;width:100%;height:100dvh;min-height:560px;background:radial-gradient(circle at 70% 30%,#f7e5c8 0%,#eed7b5 35%,#e0bc8f 70%,#d7a777 100%);isolation:isolate}
+.app{position:fixed;left:0;top:0;overflow:hidden;width:100%;height:var(--app-height,100dvh);min-height:0;background:radial-gradient(circle at 70% 30%,#f7e5c8 0%,#eed7b5 35%,#e0bc8f 70%,#d7a777 100%);isolation:isolate}
 .app::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.18;background-image:repeating-radial-gradient(circle at 20% 15%,#75411e18 0 1px,transparent 1px 8px);background-size:72px 72px}
 .app::after{content:"";position:absolute;inset:8px;border:4px solid #64361c;border-radius:28px;pointer-events:none;z-index:5;opacity:.72}
 .top{position:absolute;z-index:40;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 12px) 13px 12px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;background:linear-gradient(#f2c997 88%,#f2c99700)}
@@ -88,6 +88,28 @@ button{font:inherit;cursor:pointer}
 .zoom-shell .flip-front .year.verylong{font-size:clamp(31px,7vw,42px)}
 .zoom-shell .flip-front .year.with-unit .value{font-size:clamp(52px,12vw,68px)}
 .zoom-shell .flip-front .year.with-unit .unit{font-size:clamp(20px,5vw,26px)}
+/* Orientation iPhone/tablette : conserver les commandes dans la zone visible. */
+@media (orientation:landscape) and (max-height:560px){
+  .top{padding:calc(env(safe-area-inset-top) + 4px) max(13px,env(safe-area-inset-right)) 5px max(13px,env(safe-area-inset-left));align-items:center}
+  .logo{font-size:clamp(22px,3vw,31px)}
+  .sub{font-size:11px;margin-top:2px}
+  .top-actions{flex-direction:row;align-items:center;gap:7px}
+  .sort-toggle{padding:5px 8px;font-size:11px}
+  .sort-icon{font-size:16px}
+  .mode{padding:5px 8px;font-size:10px}
+  .bottom{padding:5px max(17px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 5px) max(17px,env(safe-area-inset-left));gap:8px}
+  .arrow{width:36px;height:36px;flex-basis:36px;font-size:24px}
+  .count{font-size:12px}
+  .track{margin-top:4px;height:5px}
+  .app::after{inset:4px;border-width:2px;border-radius:15px}
+}
+@media (orientation:landscape) and (max-height:400px){
+  .logo{font-size:21px}
+  .sub{font-size:10px}
+  .top{padding-top:calc(env(safe-area-inset-top) + 2px);padding-bottom:3px}
+  .bottom{padding-top:3px;padding-bottom:calc(env(safe-area-inset-bottom) + 3px)}
+  .arrow{width:30px;height:30px;flex-basis:30px;font-size:20px}
+}
 @media(prefers-reduced-motion:reduce){.flip-inner{transition-duration:.15s}.zoom-shell{transition-duration:.15s}}
 </style>
 </head>
@@ -96,7 +118,7 @@ button{font:inherit;cursor:pointer}
   <header class="top">
     <div>
       <div class="logo">⌛ Timeline</div>
-      <div class="sub">438 cartes historiques · Mode éducatif</div>
+      <div class="sub">Voyage à travers le temps · Mode éducatif</div>
     </div>
     <div class="top-actions">
       <button type="button" class="sort-toggle" id="sortToggle" aria-label="Changer le sens chronologique" title="Inverser l'ordre et recommencer à l'autre extrémité">
@@ -202,7 +224,7 @@ function computeLayout(){
     const w=stage.clientWidth;
     const top=document.querySelector('header').getBoundingClientRect().bottom;
     const bottom=document.querySelector('.bottom').getBoundingClientRect().top;
-    const usable=Math.max(340,bottom-top-16);
+    const usable=Math.max(145,bottom-top-16);
     const n=visibleCount;
     // Sur grand écran, chaque carte conserve son emplacement horizontal, même au-delà de 6.
     // Retain the original bowed path, but avoid overlapping neighbours.
@@ -231,7 +253,7 @@ function computeLayout(){
   const w=stage.clientWidth;
   const top=document.querySelector('header').getBoundingClientRect().bottom;
   const bottom=document.querySelector('.bottom').getBoundingClientRect().top;
-  const available=Math.max(360,bottom-top);
+  const available=Math.max(145,bottom-top);
   const baseH=404; // hauteur naturelle de la carte agrandie
   const sizes=[.31,.38,.48].map(f=>Math.min(baseH*.78,available*f));
   const scales=sizes.map(h=>h/baseH);
@@ -497,8 +519,38 @@ document.getElementById('sortToggle').onclick=()=>{
   document.getElementById('sortText').textContent=startOldest?'Ancien → récent':'Récent → ancien';
   render();
 };
-window.addEventListener('resize',render);
-render();
+// Recalibrer l'aire visible après rotation iOS/Safari ou redimensionnement PC.
+// Ne jamais laisser le document défiler sous les commandes fixes.
+function syncViewport(){
+  const h=window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--app-height',Math.round(h)+'px');
+  window.scrollTo(0,0);
+  if(selected>=0 && !closing){
+    const w=window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    const cardW=Math.min(w*.88,390);
+    const cardH=Math.min(h*.79,585);
+    zoom.style.left=((w-cardW)/2)+'px';
+    zoom.style.top=((h-cardH)/2)+'px';
+    zoom.style.width=cardW+'px';
+    zoom.style.height=cardH+'px';
+  }
+  render();
+}
+let viewportRefresh=0;
+function scheduleViewportSync(){
+  cancelAnimationFrame(viewportRefresh);
+  viewportRefresh=requestAnimationFrame(syncViewport);
+}
+window.addEventListener('resize',scheduleViewportSync);
+window.addEventListener('orientationchange',()=>{
+  scheduleViewportSync();
+  setTimeout(syncViewport,120);
+  setTimeout(syncViewport,400);
+});
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',scheduleViewportSync);
+}
+syncViewport();
 </script>
 </body>
 </html>
