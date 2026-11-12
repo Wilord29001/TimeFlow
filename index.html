@@ -177,7 +177,57 @@ function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
 // puis courbure progressive vers le bas droit. Les trois cartes sont
 // placées selon leur centre et leur hauteur réelle, afin de préserver les années.
 let stagePositions=[];
+let visibleCount=3;
+function desiredCardCount(){
+  // Nombre de cartes réellement proportionnel à la largeur disponible.
+  // Préserve trois cartes sur les téléphones et tient compte de la hauteur.
+  const w=stage.clientWidth, h=stage.clientHeight;
+  if(w<740 || h<520) return 3;
+  if(h<610) return Math.min(4,Math.max(3,Math.floor(w/205)));
+  if(h<680) return Math.min(5,Math.max(3,Math.floor(w/205)));
+  return Math.max(3,Math.min(DATA.length,Math.floor(w/205)));
+}
+function updateCardCount(){
+  const next=desiredCardCount();
+  if(next===visibleCount)return;
+  // Keep the chronology at its chosen edge when the screen is resized.
+  if(startOldest && cursor>=DATA.length-visibleCount-0.01){
+    cursor=Math.max(0,DATA.length-next);
+  }
+  visibleCount=next;
+}
 function computeLayout(){
+  updateCardCount();
+  if(visibleCount>3){
+    const w=stage.clientWidth;
+    const top=document.querySelector('header').getBoundingClientRect().bottom;
+    const bottom=document.querySelector('.bottom').getBoundingClientRect().top;
+    const usable=Math.max(340,bottom-top-16);
+    const n=visibleCount;
+    // Sur grand écran, chaque carte conserve son emplacement horizontal, même au-delà de 6.
+    // Retain the original bowed path, but avoid overlapping neighbours.
+    const slot=w/n;
+    const largestW=Math.min(slot*.88,228);
+    const largestH=Math.min(usable*.62,largestW*490/326);
+    const maxScale=Math.min(largestW/326,largestH/490);
+    const minScale=maxScale*.80;
+    const margin=Math.max(16,largestW*.55);
+    const firstX=margin;
+    const lastX=w-margin;
+    const firstY=top+usable*.30;
+    const lastY=bottom-usable*.30;
+    stagePositions=Array.from({length:n},(_,i)=>{
+      const u=i/(n-1);
+      const fx=.78*u+.22*u*u;
+      const fy=1.60*u-.60*u*u;
+      return {
+        x:firstX+(lastX-firstX)*fx,
+        y:firstY+(lastY-firstY)*fy,
+        scale:minScale+(maxScale-minScale)*u
+      };
+    });
+    return;
+  }
   const w=stage.clientWidth;
   const top=document.querySelector('header').getBoundingClientRect().bottom;
   const bottom=document.querySelector('.bottom').getBoundingClientRect().top;
@@ -196,6 +246,14 @@ function computeLayout(){
   ];
 }
 function at(t){
+  // The three-card iPhone geometry is preserved; wider screens extend the same arc.
+  if(visibleCount>3){
+    const a=stagePositions[0], b=stagePositions[visibleCount-1];
+    const u=t/(visibleCount-1);
+    const fx=.78*u+.22*u*u;
+    const fy=1.60*u-.60*u*u;
+    return {x:a.x+(b.x-a.x)*fx,y:a.y+(b.y-a.y)*fy,scale:a.scale+(b.scale-a.scale)*u};
+  }
   // t=0 : loin en haut gauche ; t=1 : milieu ; t=2 : proche en bas droit.
   // Interpolation quadratique à tangente verticale au départ, puis davantage horizontale.
   const a=stagePositions[0],m=stagePositions[1],b=stagePositions[2];
@@ -209,7 +267,7 @@ function at(t){
 function redrawRoad(){
   if(!stagePositions.length)return;
   let d='';
-  for(let t=-.4;t<=2.6;t+=.05){
+  for(let t=-.4;t<=visibleCount-1+.6;t+=.05){
     const p=at(t);
     d+=(d?' L':' M')+(100*p.x/stage.clientWidth).toFixed(3)+' '+(100*p.y/stage.clientHeight).toFixed(3);
   }
@@ -218,15 +276,15 @@ function redrawRoad(){
 function render(){
   computeLayout();redrawRoad();
   const near=Math.round(cursor);
-  for(let i=Math.max(0,near-2);i<=Math.min(DATA.length-1,near+5);i++){
+  for(let i=Math.max(0,near-visibleCount);i<=Math.min(DATA.length-1,near+visibleCount+2);i++){
     const img=elements[i].querySelector('img');
     if(!img.getAttribute('src')){img.src=DATA[i].img;img.decoding='sync';}
   }
-  let current=Math.max(0,Math.min(DATA.length-1,Math.round(startOldest ? cursor+2 : cursor)));
+  let current=Math.max(0,Math.min(DATA.length-1,Math.round(startOldest ? cursor+visibleCount-1 : cursor)));
   elements.forEach((e,i)=>{
     // En avançant dans les années, la carte précédente quitte le bas droit.
-    const t=2-i+cursor;
-    const visible=t>-.26 && t<2.26;
+    const t=visibleCount-1-i+cursor;
+    const visible=t>-.26 && t<visibleCount-1+.26;
     e.style.display=visible?'flex':'none';
     if(!visible)return;
     const img=e.querySelector('img');
@@ -241,7 +299,7 @@ function render(){
     e.style.zIndex=String(90-Math.round(t*10));
     e.style.opacity='1';
   });
-  document.getElementById('count').textContent=`Carte ${DATA.length-current} / ${DATA.length} · ${startOldest?'Ancien → récent':'Récent → ancien'}`;
+  document.getElementById('count').textContent=`Carte ${DATA.length-current} / ${DATA.length} · ${visibleCount} visibles · ${startOldest?'Ancien → récent':'Récent → ancien'}`;
   document.getElementById('fill').style.width=(cursor/(DATA.length-1)*100)+'%';
 }
 function move(v){if(selected>=0) return; cursor=clamp(v,0,DATA.length-1); render();}
@@ -406,10 +464,22 @@ stage.addEventListener('pointermove',e=>{
   }
   move(cursor+delta/190);
 });
-function end(){
+function end(e){
   if(!dragging)return;
   dragging=false;
-  if(!moving){stopMovingLater();return;}
+  if(!moving){
+    // Sur PC, setPointerCapture transfère le clic à la scène plutôt qu'à la carte.
+    // Retrouver la carte sous le pointeur au relâchement et ouvrir son recto.
+    if(e && e.pointerType==='mouse' && e.button===0){
+      const hit=document.elementFromPoint(e.clientX,e.clientY);
+      const card=hit && hit.closest('.card');
+      if(card && stage.contains(card)){
+        const i=elements.indexOf(card);
+        if(i>=0)focusCard(i);
+      }
+    }
+    stopMovingLater();return;
+  }
   // Pas d'inertie si le doigt est resté immobile avant le relâchement.
   if(performance.now()-lastMotionTime>100){touchSpeed=0;}
   startInertia();
@@ -423,7 +493,7 @@ document.getElementById('sortToggle').onclick=()=>{
   if(selected>=0)return;
   stopInertia();
   startOldest=!startOldest;
-  cursor=startOldest?Math.max(0,DATA.length-3):0;
+  cursor=startOldest?Math.max(0,DATA.length-visibleCount):0;
   document.getElementById('sortText').textContent=startOldest?'Ancien → récent':'Récent → ancien';
   render();
 };
